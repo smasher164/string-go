@@ -700,6 +700,78 @@ func (s *Scanner) scanRawString() string {
 	return string(lit)
 }
 
+func (s *Scanner) scanDelimPrefix() (delim string) {
+	for offs := s.offset; offs < len(s.src); offs++ {
+		switch s.src[offs] {
+		case '^':
+			delim += "^"
+		case '`':
+			s.offset = offs
+			s.rdOffset = offs + 1
+			s.ch = '`'
+			return delim
+		default:
+			return ""
+		}
+	}
+	return ""
+}
+
+func (s *Scanner) scanDelim(delim string) bool {
+	offs := s.offset
+	for i := 0; i < len(delim); i++ {
+		if offs >= len(s.src) || s.src[offs] != '^' {
+			return false
+		}
+		offs++
+	}
+	// it wouuld be more efficient to just set the offset,
+	// rdOffset, and ch directly without looping. but i don't
+	// want to duplicate the logic inside s.next() right now
+	// and mess something up by accident.
+	for i := 0; i < len(delim); i++ {
+		s.next()
+	}
+	return true
+}
+
+func (s *Scanner) scanDelimitedStringLiteral(delim string) string {
+	offs := s.offset
+	s.next()
+	hasCR := false
+	for {
+		ch := s.ch
+		if ch < 0 {
+			s.error(offs, "raw string literal not terminated")
+			break
+		}
+		s.next()
+		if ch == '`' && s.scanDelim(delim) {
+			break
+		}
+		if ch == '\r' {
+			hasCR = true
+		}
+	}
+
+	lit := s.src[offs:s.offset]
+	if hasCR {
+		lit = stripCR(lit, false)
+	}
+
+	return string(lit)
+}
+
+func (s *Scanner) scanUnaryCaret() (tok token.Token, lit string, insertSemi bool) {
+	delim := s.scanDelimPrefix()
+	if delim == "" {
+		s.next()
+		return s.switch2(token.XOR, token.XOR_ASSIGN), "", false
+	}
+	// sitting on '^'
+	return token.STRING, delim + s.scanDelimitedStringLiteral(delim), true
+}
+
 func (s *Scanner) skipWhitespace() {
 	for s.ch == ' ' || s.ch == '\t' || s.ch == '\n' && !s.insertSemi || s.ch == '\r' {
 		s.next()
@@ -805,6 +877,8 @@ scanAgain:
 	case isDecimal(ch) || ch == '.' && isDecimal(rune(s.peek())):
 		insertSemi = true
 		tok, lit = s.scanNumber()
+	case ch == '^':
+		tok, lit, insertSemi = s.scanUnaryCaret()
 	default:
 		s.next() // always make progress
 		switch ch {
@@ -898,8 +972,6 @@ scanAgain:
 			}
 		case '%':
 			tok = s.switch2(token.REM, token.REM_ASSIGN)
-		case '^':
-			tok = s.switch2(token.XOR, token.XOR_ASSIGN)
 		case '<':
 			if s.ch == '-' {
 				s.next()
