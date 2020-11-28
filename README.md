@@ -8,7 +8,7 @@ To try it out, execute
 $ go run cmd/string-go file.go
 ```
 where `file.go` contains Go source with delimited strings. Running this command
-will place `generated.file.go` into the current directory, containing the equivalent
+will place `generated.file.go` into the same directory, containing the equivalent
 Go source without delimited strings.
 
 For example, given the following file with a delimited string literal:
